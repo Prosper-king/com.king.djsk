@@ -1,0 +1,159 @@
+package com.king.utils;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import com.alibaba.fastjson.JSONException;
+import com.alibaba.fastjson.JSONObject;
+
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.kudu.client.*;
+import org.apache.log4j.Logger;
+
+public class KuduSink extends RichSinkFunction<JSONObject> {
+    /**
+     *
+     */
+    private static final long serialVersionUID = 1L;
+    public static final String KUDU_MASTER = System.getProperty("kuduMaster", "10.3.184.44:7051");
+    private  static KuduClient client = null;
+    private  static KuduSession session = null;
+    private  static KuduTable table = null;
+    private static Logger logger = Logger.getLogger(KuduSink.class);
+ 
+
+    @Override
+    public void open(Configuration parameters) throws Exception {
+        if(client ==null ){
+        	client = new KuduClient.KuduClientBuilder(KuduSink.KUDU_MASTER).build();
+            logger.info("客户端已存在，不需要重新创建");
+        }
+        if(session==null) {
+           session = client.newSession();
+        }
+        if(table==null) {
+	        try {
+	            table = client.openTable("impala::impala_kudu.AIU_LCCONT");
+	        } catch ( KuduException e) {
+	            logger.error("其他异常--"+e.getMessage());
+	        }
+        }
+    }
+
+   
+    @Override
+    public void invoke(JSONObject value) throws Exception {
+        logger.info("回调开始*********************************************");
+         String tablename = (String) value.get("table");
+         String realtab = tablename.split("\\.")[1];
+         ArrayList<JSONObject> list = new ArrayList<JSONObject>(); 
+         list.add((JSONObject) value.get("after"));
+        insertDatas("",list,null);
+    }
+    
+    @Override
+    public void close() throws Exception {
+        // TODO Auto-generated method stub
+        super.close();
+    }
+
+    /**
+     * 批量插入数据
+     * @param tableName
+     * @param dataSets
+     * @param columns
+     * @throws KuduException
+     */
+    public static void insertDatas( String tableName,  List<JSONObject> dataSets,  String columns)  {
+        logger.info("数据开始插入*********************************************");
+      
+        List<String> columnsList = new ArrayList();
+        if(columns==null||"".equals(columns)){
+
+        }else{
+          columnsList = Arrays.stream(columns.split(",")).collect(Collectors.toList());
+        }
+        session.setFlushMode(SessionConfiguration.FlushMode.AUTO_FLUSH_BACKGROUND);
+        for (JSONObject datarow :dataSets) {
+            insertData(table,datarow,columnsList);
+        }
+        // Call session.close() to end the session and ensure the rows are
+        // flushed and errors are returned.
+        // You can also call session.flush() to do the same without ending the session.
+        // When flushing in AUTO_FLUSH_BACKGROUND mode (the mode recommended
+        // for most workloads, you must check the pending errors as shown below, since
+        // write operations are flushed to Kudu in background threads.
+        try {
+            session.close();
+        } catch (KuduException e) {
+            e.printStackTrace();
+        }
+        if (session.countPendingErrors() != 0) {
+            System.out.println("errors inserting rows");
+            org.apache.kudu.client.RowErrorsAndOverflowStatus roStatus = session.getPendingErrors();
+            org.apache.kudu.client.RowError[] errs = roStatus.getRowErrors();
+            int numErrs = Math.min(errs.length, 5);
+            System.out.println("there were errors inserting rows to Kudu");
+            System.out.println("the first few errors follow:");
+            for (int i = 0; i < numErrs; i++) {
+                logger.error(errs[i]);
+            }
+            if (roStatus.isOverflowed()) {
+                logger.error("error buffer overflowed: some errors were discarded");
+            }
+            throw new RuntimeException("error inserting rows to Kudu");
+        }
+        logger.info("Inserted " + dataSets.size() + " rows");
+    }
+
+    /**
+     * 批量插入数据
+     * @param tableName
+     * @param dataSets
+     * @param columns
+     * @throws KuduException
+     */
+    public static void insertData(KuduTable table,JSONObject datarow,List<String> columnsList)  {
+            Insert insert = table.newInsert();
+            PartialRow row = insert.getRow();
+            if(columnsList!=null&&columnsList.size()>0){
+                for (String column:columnsList){
+                    String value = null;
+                    try {
+                        Object values = datarow.get(column);
+                        value = values==null?"":values.toString();
+                        row.addString(column.toLowerCase(),value);
+                    } catch (JSONException e) {
+                        logger.error("解析json失败--"+e.getMessage()+"-column="+column+"-value="+value);
+                    }catch (Exception e) {
+                        logger.error("其他异常--"+e.getMessage()+"-column="+column+"-value="+value);
+                    }
+                }
+            }else{
+                Iterator<String> dataRowKeys = datarow.keySet().iterator();
+                while(dataRowKeys.hasNext()){
+
+                    String column = (String) dataRowKeys.next();
+                    String value = null;
+                    try {
+                        Object values = datarow.get(column);
+                        value = values==null?"":values.toString();
+                        row.addString(column.toLowerCase(),value);
+                    }catch (JSONException e) {
+                        logger.error("解析json失败--"+e.getMessage()+"-column="+column+"-value="+value);
+                    }catch (Exception e) {
+                        logger.error("其他异常--"+e.getMessage()+"-column="+column+"-value="+value);
+                    }
+                }
+            }
+            try {
+                session.apply(insert);
+            } catch (KuduException e) {
+                e.printStackTrace();
+            }
+    }
+}

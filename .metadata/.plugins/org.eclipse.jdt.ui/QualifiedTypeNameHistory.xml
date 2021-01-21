@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<qualifiedTypeNameHistroy>
+<fullyQualifiedTypeName name="org.apache.flink.streaming.api.CheckpointingMode"/>
+<fullyQualifiedTypeName name="org.apache.kafka.common.serialization.StringDeserializer"/>
+<fullyQualifiedTypeName name="org.apache.kafka.clients.consumer.ConsumerConfig"/>
+<fullyQualifiedTypeName name="org.apache.flink.streaming.api.datastream.DataStream"/>
+</qualifiedTypeNameHistroy>

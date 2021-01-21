@@ -1,0 +1,90 @@
+package hbasedemo;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.sql.DriverManager;
+import java.sql.*;
+import java.sql.SQLException;
+import java.util.Properties;
+
+import org.apache.log4j.Logger;
+
+public class ImpalaUtils {
+    private static final String CONNECTION_URL_PROPERTY = "connection.url";
+    private static final String JDBC_DRIVER_NAME_PROPERTY = "jdbc.driver.class.name";
+    private static Logger logger = Logger.getLogger(PhoenixUtils.class);
+
+    private static String connectionUrl;
+    private static String jdbcDriverName;
+
+    private static void loadConfiguration() throws IOException {
+        InputStream input = null;
+        try {
+            String filename = ImpalaUtils.class.getSimpleName() + ".conf";
+            input = ImpalaUtils.class.getClassLoader().getResourceAsStream(filename);
+            Properties prop = new Properties();
+            prop.load(input);
+
+            connectionUrl = prop.getProperty(CONNECTION_URL_PROPERTY);
+            jdbcDriverName = prop.getProperty(JDBC_DRIVER_NAME_PROPERTY);
+        } finally {
+            try {
+                if (input != null)
+                    input.close();
+            } catch (IOException e) {
+                logger.error("加载配置文件过程中异常:"+"="+e.getMessage());
+            }
+        }
+    }
+
+    public static void main(String[] args) throws IOException {
+  
+        if (args.length != 1) {
+            System.out.println("Syntax: ClouderaImpalaJdbcExample \"<SQL_query>\"");
+            // System.exit(1);
+        }
+
+  
+        // String sqlStatement = args[0];
+        String sqlStatement = "select * from impala:impala_kudu.t_m_bus_ply_bas";
+
+        loadConfiguration();
+
+        System.out.println("\n=============================================");
+        System.out.println("Using Connection URL: " + connectionUrl);
+        System.out.println("Running Query: " + sqlStatement);
+
+        Connection con = null;
+
+        try {
+
+            Class.forName(jdbcDriverName);
+
+            con = DriverManager.getConnection(connectionUrl);
+
+            Statement stmt = con.createStatement();
+
+            ResultSet rs = stmt.executeQuery(sqlStatement);
+
+            System.out.println("\n== Begin Query Results ======================");
+
+            // print the results to the console
+            while (rs.next()) {
+                System.out.println(rs.getString(1));
+            }
+
+            System.out.println("== End Query Results =======================\n\n");
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                con.close();
+            } catch (Exception e) {
+                // swallow
+            }
+        }
+    }
+}
